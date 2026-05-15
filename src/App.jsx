@@ -7,9 +7,10 @@ const App = () => {
   const [roomId, setRoomId] = useState('');
   const [isJoined, setIsJoined] = useState(false);
   const [clues, setClues] = useState([]);
-  const [puzzleStep, setPuzzleStep] = useState(1); // 1: Clock, 2: Ledger, 3: Safe
+  const [puzzleStep, setPuzzleStep] = useState(1);
   const [status, setStatus] = useState('Başlatılıyor...');
   const [connected, setConnected] = useState(false);
+  const [showFlash, setShowFlash] = useState(false);
   
   const peerRef = useRef(null);
   const connRef = useRef(null);
@@ -22,7 +23,7 @@ const App = () => {
       });
       peerRef.current = peer;
 
-      peer.on('open', () => setStatus('Sistem Çevrimiçi.'));
+      peer.on('open', () => setStatus('Sistem Çevrimiçi. Diğer oyuncu bekleniyor...'));
       peer.on('connection', (conn) => setupConnection(conn));
       peer.on('error', () => {
         if (role === 'future') setTimeout(attemptConnection, 3000);
@@ -41,16 +42,24 @@ const App = () => {
     connRef.current = conn;
     conn.on('open', () => {
       setConnected(true);
-      setStatus('BAĞLANDI!');
+      setStatus('BAĞLANTI BAŞARILI!');
     });
 
     conn.on('data', (data) => {
       if (data.type === 'next-step') {
-        setPuzzleStep(data.step);
+        triggerTransition(data.step);
       } else {
         setClues((prev) => [...prev, data]);
       }
     });
+  };
+
+  const triggerTransition = (step) => {
+    setShowFlash(true);
+    setTimeout(() => {
+      setPuzzleStep(step);
+      setShowFlash(false);
+    }, 1500);
   };
 
   const sendClue = (type, value) => {
@@ -60,7 +69,7 @@ const App = () => {
   };
 
   const nextStep = (step) => {
-    setPuzzleStep(step);
+    triggerTransition(step);
     sendClue('next-step', step);
   };
 
@@ -88,7 +97,14 @@ const App = () => {
 
   return (
     <div className={`app-container ${role}-view`}>
-      {!connected && (
+      {showFlash && (
+        <div className="success-overlay" style={{ background: 'white', color: 'black' }}>
+          <h1 style={{ fontSize: '4rem' }}>BÖLME AÇILDI!</h1>
+          <p>Zaman çizgisi güncelleniyor...</p>
+        </div>
+      )}
+
+      {!connected && !showFlash && (
         <div className="success-overlay" style={{ background: 'rgba(0,0,0,0.8)' }}>
           <h2 className="glitch">{status}</h2>
           {role === 'future' && <button onClick={attemptConnection}>BAĞLANMAYI DENE</button>}
@@ -109,6 +125,20 @@ const App = () => {
 const PastWorkflow = ({ step, onNext, sendClue, incomingClues }) => {
   const [input, setInput] = useState('');
   
+  const validateClock = () => {
+    // Boşlukları ve noktaları temizleyip sadece rakamları kontrol et
+    const cleanInput = input.replace(/\D/g, '');
+    if (cleanInput === '0420' || input === '04:20') {
+      onNext(2);
+    }
+  };
+
+  const validateSafe = () => {
+    if (input.replace(/\D/g, '') === '852') {
+      onNext(4);
+    }
+  };
+
   return (
     <div className="game-view past">
       <h2>ADIM {step}: {step === 1 ? 'Antika Saat' : step === 2 ? 'Tozlu Defter' : 'Kilitli Kasa'}</h2>
@@ -116,8 +146,8 @@ const PastWorkflow = ({ step, onNext, sendClue, incomingClues }) => {
       {step === 1 && (
         <div className="paper-note">
           <p>Saati doğru zamana ayarla...</p>
-          <input type="text" placeholder="00:00" onChange={(e) => setInput(e.target.value)} />
-          <button onClick={() => input.trim() === '04:20' && onNext(2)}>AYARLA</button>
+          <input type="text" placeholder="04:20" onChange={(e) => setInput(e.target.value)} />
+          <button onClick={validateClock}>AYARLA</button>
         </div>
       )}
 
@@ -133,15 +163,15 @@ const PastWorkflow = ({ step, onNext, sendClue, incomingClues }) => {
         <div className="paper-note">
           <p>Kasanın şifresini gir:</p>
           <input type="text" placeholder="3 Haneli Şifre" onChange={(e) => setInput(e.target.value)} />
-          <button onClick={() => input.trim() === '852' && onNext(4)}>KASAYI AÇ</button>
-          <p style={{ marginTop: '1rem', fontSize: '0.8rem' }}>* İpucu gelecekteki ekranda olabilir.</p>
+          <button onClick={validateSafe}>KASAYI AÇ</button>
         </div>
       )}
 
       {step === 4 && <div className="success-overlay"><h1>OYUN TAMAMLANDI!</h1><p>Geçmiş ve gelecek birleşti.</p></div>}
 
-      <div className="clues-received">
-        {incomingClues.map((c, i) => <div key={i} className="paper-note" style={{ background: '#e0fbfc' }}>{c.value}</div>)}
+      <div className="clues-received" style={{ marginTop: '2rem' }}>
+        <h3>Gelecekten Mesaj:</h3>
+        {incomingClues.map((c, i) => <div key={i} className="paper-note" style={{ background: '#e0fbfc', marginTop: '1rem' }}>{c.value}</div>)}
       </div>
     </div>
   );
@@ -164,17 +194,18 @@ const FutureWorkflow = ({ step, onNext, sendClue, incomingClues }) => {
       {step === 2 && (
         <div className="terminal-window mission-panel">
           <p>SİSTEM KİLİTLİ: Mirasçının ismini girin.</p>
-          <input type="text" onChange={(e) => setInput(e.target.value)} />
-          <button onClick={() => input.toUpperCase() === 'AURELIUS' && onNext(3)}>DOĞRULA</button>
-          <p style={{ marginTop: '1rem' }}>Gelen Mesajlar:</p>
-          {incomingClues.filter(c => c.type === 'text').map((c, i) => <p key={i} color="#ff00c1">> {c.value}</p>)}
+          <input type="text" placeholder="İsim..." onChange={(e) => setInput(e.target.value)} />
+          <button onClick={() => input.toUpperCase().trim() === 'AURELIUS' && onNext(3)}>DOĞRULA</button>
+          <div style={{ marginTop: '1rem', borderTop: '1px solid rgba(0,242,255,0.3)', paddingTop: '1rem' }}>
+            <p>Geçmişten Gelen:</p>
+            {incomingClues.filter(c => c.type === 'text').map((c, i) => <p key={i} style={{ color: '#ff00c1' }}>> {c.value}</p>)}
+          </div>
         </div>
       )}
 
       {step === 3 && (
         <div className="terminal-window mission-panel">
           <p>KASA KOORDİNATI: (X:8, Y:5, Z:2)</p>
-          <p>Bu numaraları geçmişe gönder!</p>
           <button onClick={() => sendClue('future-clue', 'Şifre: 852')}>ŞİFREYİ GÖNDER</button>
         </div>
       )}
