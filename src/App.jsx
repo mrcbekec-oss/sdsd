@@ -8,6 +8,7 @@ const App = () => {
   const [isJoined, setIsJoined] = useState(false);
   const [clues, setClues] = useState([]);
   const [puzzleSolved, setPuzzleSolved] = useState(false);
+  const [status, setStatus] = useState('Başlatılıyor...');
   const [connected, setConnected] = useState(false);
   
   const peerRef = useRef(null);
@@ -15,14 +16,24 @@ const App = () => {
 
   useEffect(() => {
     if (isJoined && role) {
-      const peerId = role === 'past' ? `tp-${roomId}` : `tf-${roomId}`;
-      const peer = new Peer(peerId);
+      // Dünyadaki diğer projelerle çakışmaması için çok özel bir ID prefixi
+      const peerId = role === 'past' ? `antigravity-game-past-${roomId}` : `antigravity-game-future-${roomId}`;
+      
+      const peer = new Peer(peerId, {
+        config: {
+          'iceServers': [
+            { url: 'stun:stun.l.google.com:19302' },
+            { url: 'stun:stun1.l.google.com:19302' }
+          ]
+        },
+        debug: 3
+      });
+      
       peerRef.current = peer;
 
       peer.on('open', (id) => {
-        console.log('ID Alındı:', id);
+        setStatus('Sistem Çevrimiçi. Diğer oyuncu bekleniyor...');
         if (role === 'future') {
-          // Bağlanmayı dene
           attemptConnection();
         }
       });
@@ -32,9 +43,13 @@ const App = () => {
       });
 
       peer.on('error', (err) => {
-        console.error('Peer hatası:', err);
-        // Eğer ID alınmışsa ve gelecekse tekrar dene
-        if (role === 'future') setTimeout(attemptConnection, 3000);
+        console.error('Peer Hatası:', err.type);
+        if (err.type === 'peer-unavailable') {
+          setStatus('Arkadaşın henüz odaya girmemiş, aranıyor...');
+          if (role === 'future') setTimeout(attemptConnection, 3000);
+        } else {
+          setStatus('Bağlantı Hatası: ' + err.type);
+        }
       });
 
       return () => peer.destroy();
@@ -43,21 +58,20 @@ const App = () => {
 
   const attemptConnection = () => {
     if (!peerRef.current || connected) return;
-    console.log('Geçmişe bağlanmaya çalışılıyor...');
-    const conn = peerRef.current.connect(`tp-${roomId}`, { reliable: true });
+    setStatus('Geçmişteki oyuncuya bağlanılıyor...');
+    const conn = peerRef.current.connect(`antigravity-game-past-${roomId}`, { 
+      reliable: true,
+      metadata: { role: 'future' }
+    });
     setupConnection(conn);
-    
-    // Eğer 5 saniye sonra hala bağlanmadıysa tekrar dene
-    setTimeout(() => {
-      if (!connected && role === 'future') attemptConnection();
-    }, 5000);
   };
 
   const setupConnection = (conn) => {
     connRef.current = conn;
     conn.on('open', () => {
       setConnected(true);
-      console.log('BAĞLANDI!');
+      setStatus('BAĞLANTI BAŞARILI!');
+      console.log('Peer-to-Peer Aktif!');
     });
 
     conn.on('data', (data) => {
@@ -66,6 +80,12 @@ const App = () => {
       } else {
         setClues((prev) => [...prev, data]);
       }
+    });
+
+    conn.on('close', () => {
+      setConnected(false);
+      setStatus('Bağlantı koptu, tekrar deneniyor...');
+      if (role === 'future') setTimeout(attemptConnection, 3000);
     });
   };
 
@@ -120,9 +140,12 @@ const App = () => {
   return (
     <div className={`app-container ${role}-view`}>
       {!connected && (
-        <div className="success-overlay" style={{ background: 'rgba(0,0,0,0.7)' }}>
-          <h2>Bağlantı Bekleniyor...</h2>
-          <p>Diğer oyuncunun odaya girmesini bekleyin.</p>
+        <div className="success-overlay" style={{ background: 'rgba(0,0,0,0.8)' }}>
+          <div className="terminal-window">
+            <h2 className="glitch" data-text={status}>{status}</h2>
+            <p style={{ marginTop: '1rem', opacity: 0.7 }}>Oda No: {roomId} | Rol: {role.toUpperCase()}</p>
+            {role === 'future' && <button onClick={attemptConnection} style={{ marginTop: '1rem' }}>ŞİMDİ BAĞLANMAYI DENE</button>}
+          </div>
         </div>
       )}
       {puzzleSolved && (
