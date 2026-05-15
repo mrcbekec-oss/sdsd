@@ -1,9 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { io } from 'socket.io-client';
+import React, { useState, useEffect, useRef } from 'react';
+import { Peer } from 'peerjs';
 import './App.css';
-
-// Socket bağlantısı - Yerel ağdaki diğer cihazlar için dinamik IP
-const socket = io(`http://${window.location.hostname}:3001`);
 
 const App = () => {
   const [role, setRole] = useState(null);
@@ -11,27 +8,59 @@ const App = () => {
   const [isJoined, setIsJoined] = useState(false);
   const [clues, setClues] = useState([]);
   const [puzzleSolved, setPuzzleSolved] = useState(false);
+  const [connected, setConnected] = useState(false);
+  
+  const peerRef = useRef(null);
+  const connRef = useRef(null);
 
   useEffect(() => {
-    if (isJoined) {
-      socket.emit('join-room', roomId);
+    if (isJoined && role) {
+      // PeerJS ID'si rol ve oda numarasına göre oluşturulur
+      // Strateji: GEÇMİŞ sunucu (host) olur, GELECEK ona bağlanır.
+      const peerId = role === 'past' ? `timeless-past-${roomId}` : `timeless-future-${roomId}`;
+      const peer = new Peer(peerId);
+      peerRef.current = peer;
 
-      socket.on('receive-clue', (clue) => {
-        if (clue.type === 'puzzle-success') {
-          setPuzzleSolved(true);
-        } else {
-          setClues((prev) => [...prev, clue]);
+      peer.on('open', (id) => {
+        console.log('Bağlantı ID:', id);
+        if (role === 'future') {
+          // Gelecek oyuncusu geçmişe bağlanmaya çalışır
+          const conn = peer.connect(`timeless-past-${roomId}`);
+          setupConnection(conn);
         }
       });
-    }
 
-    return () => {
-      socket.off('receive-clue');
-    };
-  }, [isJoined, roomId]);
+      peer.on('connection', (conn) => {
+        // Geçmiş oyuncusu bağlantıyı kabul eder
+        setupConnection(conn);
+      });
+
+      return () => {
+        peer.destroy();
+      };
+    }
+  }, [isJoined, role, roomId]);
+
+  const setupConnection = (conn) => {
+    connRef.current = conn;
+    conn.on('open', () => {
+      setConnected(true);
+      console.log('Bağlantı kuruldu!');
+    });
+
+    conn.on('data', (data) => {
+      if (data.type === 'puzzle-success') {
+        setPuzzleSolved(true);
+      } else {
+        setClues((prev) => [...prev, data]);
+      }
+    });
+  };
 
   const sendClue = (type, value) => {
-    socket.emit('send-clue', { roomId, type, value });
+    if (connRef.current && connRef.current.open) {
+      connRef.current.send({ type, value });
+    }
   };
 
   if (!isJoined) {
@@ -78,6 +107,12 @@ const App = () => {
 
   return (
     <div className={`app-container ${role}-view`}>
+      {!connected && (
+        <div className="success-overlay" style={{ background: 'rgba(0,0,0,0.7)' }}>
+          <h2>Bağlantı Bekleniyor...</h2>
+          <p>Diğer oyuncunun odaya girmesini bekleyin.</p>
+        </div>
+      )}
       {puzzleSolved && (
         <div className="success-overlay">
           <h1 className={role === 'future' ? 'glitch' : ''} data-text="BAĞLANTI KURULDU">BAĞLANTI KURULDU</h1>
