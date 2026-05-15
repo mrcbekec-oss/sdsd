@@ -15,37 +15,49 @@ const App = () => {
 
   useEffect(() => {
     if (isJoined && role) {
-      // PeerJS ID'si rol ve oda numarasına göre oluşturulur
-      // Strateji: GEÇMİŞ sunucu (host) olur, GELECEK ona bağlanır.
-      const peerId = role === 'past' ? `timeless-past-${roomId}` : `timeless-future-${roomId}`;
+      const peerId = role === 'past' ? `tp-${roomId}` : `tf-${roomId}`;
       const peer = new Peer(peerId);
       peerRef.current = peer;
 
       peer.on('open', (id) => {
-        console.log('Bağlantı ID:', id);
+        console.log('ID Alındı:', id);
         if (role === 'future') {
-          // Gelecek oyuncusu geçmişe bağlanmaya çalışır
-          const conn = peer.connect(`timeless-past-${roomId}`);
-          setupConnection(conn);
+          // Bağlanmayı dene
+          attemptConnection();
         }
       });
 
       peer.on('connection', (conn) => {
-        // Geçmiş oyuncusu bağlantıyı kabul eder
         setupConnection(conn);
       });
 
-      return () => {
-        peer.destroy();
-      };
+      peer.on('error', (err) => {
+        console.error('Peer hatası:', err);
+        // Eğer ID alınmışsa ve gelecekse tekrar dene
+        if (role === 'future') setTimeout(attemptConnection, 3000);
+      });
+
+      return () => peer.destroy();
     }
   }, [isJoined, role, roomId]);
+
+  const attemptConnection = () => {
+    if (!peerRef.current || connected) return;
+    console.log('Geçmişe bağlanmaya çalışılıyor...');
+    const conn = peerRef.current.connect(`tp-${roomId}`, { reliable: true });
+    setupConnection(conn);
+    
+    // Eğer 5 saniye sonra hala bağlanmadıysa tekrar dene
+    setTimeout(() => {
+      if (!connected && role === 'future') attemptConnection();
+    }, 5000);
+  };
 
   const setupConnection = (conn) => {
     connRef.current = conn;
     conn.on('open', () => {
       setConnected(true);
-      console.log('Bağlantı kuruldu!');
+      console.log('BAĞLANDI!');
     });
 
     conn.on('data', (data) => {
