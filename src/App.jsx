@@ -7,41 +7,69 @@ const socket = io(`http://${window.location.hostname}:3001`);
 
 const App = () => {
   const [role, setRole] = useState(null);
-  const [roomId] = useState('demo-room');
+  const [roomId, setRoomId] = useState('');
+  const [isJoined, setIsJoined] = useState(false);
   const [clues, setClues] = useState([]);
   const [puzzleSolved, setPuzzleSolved] = useState(false);
 
   useEffect(() => {
-    socket.emit('join-room', roomId);
+    if (isJoined) {
+      socket.emit('join-room', roomId);
 
-    socket.on('receive-clue', (clue) => {
-      if (clue.type === 'puzzle-success') {
-        setPuzzleSolved(true);
-      } else {
-        setClues((prev) => [...prev, clue]);
-      }
-    });
+      socket.on('receive-clue', (clue) => {
+        if (clue.type === 'puzzle-success') {
+          setPuzzleSolved(true);
+        } else {
+          setClues((prev) => [...prev, clue]);
+        }
+      });
+    }
 
     return () => {
       socket.off('receive-clue');
     };
-  }, [roomId]);
+  }, [isJoined, roomId]);
 
   const sendClue = (type, value) => {
     socket.emit('send-clue', { roomId, type, value });
   };
+
+  if (!isJoined) {
+    return (
+      <div className="choice-screen" style={{ flexDirection: 'column', background: '#0a0a0c' }}>
+        <h1 className="glitch" data-text="ZAMAN ÖTESİ BAĞLANTI">ZAMAN ÖTESİ BAĞLANTI</h1>
+        <div className="terminal-window" style={{ marginTop: '2rem' }}>
+          <p>Bir Oda Numarası Girin:</p>
+          <input 
+            type="text" 
+            placeholder="Örn: 5555" 
+            value={roomId}
+            onChange={(e) => setRoomId(e.target.value)}
+            style={{ background: 'transparent', border: '1px solid var(--future-accent)', color: 'white', padding: '1rem', marginTop: '1rem', width: '100%', fontSize: '1.5rem', textAlign: 'center' }}
+          />
+          <button 
+            disabled={!roomId}
+            onClick={() => setIsJoined(true)}
+            style={{ marginTop: '1rem', width: '100%' }}
+          >
+            SİSTEME GİRİŞ YAP
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (!role) {
     return (
       <div className="choice-screen">
         <div className="choice-side past" onClick={() => setRole('past')}>
           <h1>GEÇMİŞ</h1>
-          <p>Sene 1924. Sırlar burada saklı.</p>
+          <p>Oda: {roomId}</p>
           <button>Geçmişe Git</button>
         </div>
         <div className="choice-side future" onClick={() => setRole('future')}>
           <h1 className="glitch" data-text="GELECEK">GELECEK</h1>
-          <p>Yıl 2124. Cevaplar burada çözülecek.</p>
+          <p>Oda: {roomId}</p>
           <button>Geleceğe Bağlan</button>
         </div>
       </div>
