@@ -7,7 +7,7 @@ const App = () => {
   const [roomId, setRoomId] = useState('');
   const [isJoined, setIsJoined] = useState(false);
   const [clues, setClues] = useState([]);
-  const [puzzleSolved, setPuzzleSolved] = useState(false);
+  const [puzzleStep, setPuzzleStep] = useState(1); // 1: Clock, 2: Ledger, 3: Safe
   const [status, setStatus] = useState('Başlatılıyor...');
   const [connected, setConnected] = useState(false);
   
@@ -16,53 +16,24 @@ const App = () => {
 
   useEffect(() => {
     if (isJoined && role) {
-      // Dünyadaki diğer projelerle çakışmaması için çok özel bir ID prefixi
       const peerId = role === 'past' ? `antigravity-game-past-${roomId}` : `antigravity-game-future-${roomId}`;
-      
       const peer = new Peer(peerId, {
-        config: {
-          'iceServers': [
-            { url: 'stun:stun.l.google.com:19302' },
-            { url: 'stun:stun1.l.google.com:19302' }
-          ]
-        },
-        debug: 3
+        config: { 'iceServers': [{ url: 'stun:stun.l.google.com:19302' }] }
       });
-      
       peerRef.current = peer;
 
-      peer.on('open', (id) => {
-        setStatus('Sistem Çevrimiçi. Diğer oyuncu bekleniyor...');
-        if (role === 'future') {
-          attemptConnection();
-        }
+      peer.on('open', () => setStatus('Sistem Çevrimiçi.'));
+      peer.on('connection', (conn) => setupConnection(conn));
+      peer.on('error', () => {
+        if (role === 'future') setTimeout(attemptConnection, 3000);
       });
-
-      peer.on('connection', (conn) => {
-        setupConnection(conn);
-      });
-
-      peer.on('error', (err) => {
-        console.error('Peer Hatası:', err.type);
-        if (err.type === 'peer-unavailable') {
-          setStatus('Arkadaşın henüz odaya girmemiş, aranıyor...');
-          if (role === 'future') setTimeout(attemptConnection, 3000);
-        } else {
-          setStatus('Bağlantı Hatası: ' + err.type);
-        }
-      });
-
       return () => peer.destroy();
     }
   }, [isJoined, role, roomId]);
 
   const attemptConnection = () => {
     if (!peerRef.current || connected) return;
-    setStatus('Geçmişteki oyuncuya bağlanılıyor...');
-    const conn = peerRef.current.connect(`antigravity-game-past-${roomId}`, { 
-      reliable: true,
-      metadata: { role: 'future' }
-    });
+    const conn = peerRef.current.connect(`antigravity-game-past-${roomId}`, { reliable: true });
     setupConnection(conn);
   };
 
@@ -70,22 +41,15 @@ const App = () => {
     connRef.current = conn;
     conn.on('open', () => {
       setConnected(true);
-      setStatus('BAĞLANTI BAŞARILI!');
-      console.log('Peer-to-Peer Aktif!');
+      setStatus('BAĞLANDI!');
     });
 
     conn.on('data', (data) => {
-      if (data.type === 'puzzle-success') {
-        setPuzzleSolved(true);
+      if (data.type === 'next-step') {
+        setPuzzleStep(data.step);
       } else {
         setClues((prev) => [...prev, data]);
       }
-    });
-
-    conn.on('close', () => {
-      setConnected(false);
-      setStatus('Bağlantı koptu, tekrar deneniyor...');
-      if (role === 'future') setTimeout(attemptConnection, 3000);
     });
   };
 
@@ -95,26 +59,19 @@ const App = () => {
     }
   };
 
+  const nextStep = (step) => {
+    setPuzzleStep(step);
+    sendClue('next-step', step);
+  };
+
   if (!isJoined) {
     return (
       <div className="choice-screen" style={{ flexDirection: 'column', background: '#0a0a0c' }}>
         <h1 className="glitch" data-text="ZAMAN ÖTESİ BAĞLANTI">ZAMAN ÖTESİ BAĞLANTI</h1>
         <div className="terminal-window" style={{ marginTop: '2rem' }}>
-          <p>Bir Oda Numarası Girin:</p>
-          <input 
-            type="text" 
-            placeholder="Örn: 5555" 
-            value={roomId}
-            onChange={(e) => setRoomId(e.target.value)}
-            style={{ background: 'transparent', border: '1px solid var(--future-accent)', color: 'white', padding: '1rem', marginTop: '1rem', width: '100%', fontSize: '1.5rem', textAlign: 'center' }}
-          />
-          <button 
-            disabled={!roomId}
-            onClick={() => setIsJoined(true)}
-            style={{ marginTop: '1rem', width: '100%' }}
-          >
-            SİSTEME GİRİŞ YAP
-          </button>
+          <p>Oda Numarası:</p>
+          <input type="text" value={roomId} onChange={(e) => setRoomId(e.target.value)} style={{ background: 'transparent', border: '1px solid var(--future-accent)', color: 'white', padding: '1rem', width: '100%', textAlign: 'center' }} />
+          <button onClick={() => setIsJoined(true)} style={{ marginTop: '1rem', width: '100%' }}>GİRİŞ</button>
         </div>
       </div>
     );
@@ -123,16 +80,8 @@ const App = () => {
   if (!role) {
     return (
       <div className="choice-screen">
-        <div className="choice-side past" onClick={() => setRole('past')}>
-          <h1>GEÇMİŞ</h1>
-          <p>Oda: {roomId}</p>
-          <button>Geçmişe Git</button>
-        </div>
-        <div className="choice-side future" onClick={() => setRole('future')}>
-          <h1 className="glitch" data-text="GELECEK">GELECEK</h1>
-          <p>Oda: {roomId}</p>
-          <button>Geleceğe Bağlan</button>
-        </div>
+        <div className="choice-side past" onClick={() => setRole('past')}><h1>GEÇMİŞ</h1><button>BAŞLA</button></div>
+        <div className="choice-side future" onClick={() => setRole('future')}><h1>GELECEK</h1><button>BAĞLAN</button></div>
       </div>
     );
   }
@@ -141,130 +90,96 @@ const App = () => {
     <div className={`app-container ${role}-view`}>
       {!connected && (
         <div className="success-overlay" style={{ background: 'rgba(0,0,0,0.8)' }}>
-          <div className="terminal-window">
-            <h2 className="glitch" data-text={status}>{status}</h2>
-            <p style={{ marginTop: '1rem', opacity: 0.7 }}>Oda No: {roomId} | Rol: {role.toUpperCase()}</p>
-            {role === 'future' && <button onClick={attemptConnection} style={{ marginTop: '1rem' }}>ŞİMDİ BAĞLANMAYI DENE</button>}
-          </div>
+          <h2 className="glitch">{status}</h2>
+          {role === 'future' && <button onClick={attemptConnection}>BAĞLANMAYI DENE</button>}
         </div>
       )}
-      {puzzleSolved && (
-        <div className="success-overlay">
-          <h1 className={role === 'future' ? 'glitch' : ''} data-text="BAĞLANTI KURULDU">BAĞLANTI KURULDU</h1>
-          <p>{role === 'past' ? 'Torununla iletişim kanalı açıldı!' : 'Geçmişten gelen veriler sisteme yüklendi.'}</p>
-          <button onClick={() => setPuzzleSolved(false)}>Devam Et</button>
-        </div>
-      )}
-      {role === 'past' ? (
-        <PastView sendClue={sendClue} incomingClues={clues} onSolve={() => sendClue('puzzle-success', true)} />
-      ) : (
-        <FutureView sendClue={sendClue} incomingClues={clues} />
-      )}
+
+      <div className="game-content">
+        {role === 'past' ? (
+          <PastWorkflow step={puzzleStep} onNext={nextStep} sendClue={sendClue} incomingClues={clues} />
+        ) : (
+          <FutureWorkflow step={puzzleStep} onNext={nextStep} sendClue={sendClue} incomingClues={clues} />
+        )}
+      </div>
     </div>
   );
 };
 
-const PastView = ({ sendClue, incomingClues, onSolve }) => {
-  const [clockTime, setClockTime] = useState('');
-  const [feedback, setFeedback] = useState('');
-
-  const checkClock = () => {
-    if (clockTime === '04:20') {
-      setFeedback('Saat tıkırdadı ve bir bölme açıldı!');
-      onSolve();
-    } else {
-      setFeedback('Hiçbir şey olmadı...');
-    }
-  };
-
+const PastWorkflow = ({ step, onNext, sendClue, incomingClues }) => {
+  const [input, setInput] = useState('');
+  
   return (
     <div className="game-view past">
-      <header>
-        <h2>Zaman Ötesi Bağlantı: Geçmiş</h2>
-        <p>Evin tozlu raflarında bir şeyler bulmalısın...</p>
-      </header>
-
-      <main style={{ display: 'flex', gap: '2rem', marginTop: '2rem', flexWrap: 'wrap' }}>
+      <h2>ADIM {step}: {step === 1 ? 'Antika Saat' : step === 2 ? 'Tozlu Defter' : 'Kilitli Kasa'}</h2>
+      
+      {step === 1 && (
         <div className="paper-note">
-          <h3>Antika Duvar Saati</h3>
-          <p>Saatin yelkovanı ve akrebi garip bir şekilde durmuş. Bir saate ayarlanması gerekiyor gibi görünüyor.</p>
-          <div style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem' }}>
-            <input 
-              type="text" 
-              placeholder="00:00" 
-              value={clockTime}
-              onChange={(e) => setClockTime(e.target.value)}
-              style={{ width: '80px', padding: '0.5rem', background: 'rgba(0,0,0,0.1)', border: '1px solid #3d3023' }}
-            />
-            <button onClick={checkClock}>Ayarla</button>
-          </div>
-          {feedback && <p style={{ marginTop: '1rem', fontStyle: 'italic' }}>{feedback}</p>}
+          <p>Saati doğru zamana ayarla...</p>
+          <input type="text" placeholder="00:00" onChange={(e) => setInput(e.target.value)} />
+          <button onClick={() => input.trim() === '04:20' && onNext(2)}>AYARLA</button>
         </div>
+      )}
 
-        <div className="clues-received">
-          <h3>Gelecekten Gelen Yankılar:</h3>
-          {incomingClues.filter(c => c.type === 'future-clue').map((c, i) => (
-            <div key={i} className="paper-note" style={{ marginTop: '1rem', background: '#e0fbfc', border: '2px dashed var(--future-accent)' }}>
-              <strong>SİNYAL ALINDI:</strong>
-              <p>{c.value}</p>
-            </div>
-          ))}
+      {step === 2 && (
+        <div className="paper-note">
+          <p>Defterde bir isim karalanmış: <strong>AURELIUS</strong></p>
+          <p>Gelecekteki torununa bu ismi ilet.</p>
+          <button onClick={() => sendClue('text', 'AURELIUS')}>İSMİ GÖNDER</button>
         </div>
-      </main>
+      )}
+
+      {step === 3 && (
+        <div className="paper-note">
+          <p>Kasanın şifresini gir:</p>
+          <input type="text" placeholder="3 Haneli Şifre" onChange={(e) => setInput(e.target.value)} />
+          <button onClick={() => input.trim() === '852' && onNext(4)}>KASAYI AÇ</button>
+          <p style={{ marginTop: '1rem', fontSize: '0.8rem' }}>* İpucu gelecekteki ekranda olabilir.</p>
+        </div>
+      )}
+
+      {step === 4 && <div className="success-overlay"><h1>OYUN TAMAMLANDI!</h1><p>Geçmiş ve gelecek birleşti.</p></div>}
+
+      <div className="clues-received">
+        {incomingClues.map((c, i) => <div key={i} className="paper-note" style={{ background: '#e0fbfc' }}>{c.value}</div>)}
+      </div>
     </div>
   );
 };
 
-const FutureView = ({ sendClue, incomingClues }) => {
-  const [terminalInput, setTerminalInput] = useState('');
+const FutureWorkflow = ({ step, onNext, sendClue, incomingClues }) => {
+  const [input, setInput] = useState('');
 
   return (
     <div className="game-view future">
-      <header>
-        <h2 className="glitch" data-text="SYSTEM: MISSION CONTROL">SYSTEM: MISSION CONTROL</h2>
-      </header>
-
-      <main style={{ display: 'flex', gap: '2rem', marginTop: '2rem', flexWrap: 'wrap' }}>
-        <div className="terminal-window mission-panel" style={{ borderColor: '#ff00c1' }}>
-          <div className="terminal-header">
-            <span style={{ color: '#ff00c1' }}>GİZLİ ARŞİV_DOSYASI_01</span>
-          </div>
-          <div className="terminal-body">
-            <p style={{ color: '#ff00c1', fontWeight: 'bold' }}>[KRİTİK GÖREV]</p>
-            <p>Evin ana kasasına erişmek için saatin mekanizması geçmişte tetiklenmelidir.</p>
-            <p style={{ marginTop: '1rem' }}>Eski kayıtlara göre kilit zamanı: <span style={{ background: '#ff00c1', color: 'white', padding: '0 4px' }}>04:20</span></p>
-            <p style={{ marginTop: '1rem', fontSize: '0.9rem', opacity: 0.7 }}>* Bu bilgiyi geçmişteki ortağına ilet.</p>
-          </div>
+      <h2>MISSION STATUS: PHASE {step}</h2>
+      
+      {step === 1 && (
+        <div className="terminal-window mission-panel">
+          <p>[ARŞİV] Saat mekanizması 04:20'de tetiklenir.</p>
+          <button onClick={() => sendClue('future-clue', 'Saati 04:20 yap!')}>İPUCU GÖNDER</button>
         </div>
+      )}
 
-        <div className="terminal-window">
-          <div className="terminal-header">
-            <span>TERMINAL_COMMS</span>
-            <span style={{ color: 'var(--future-accent)' }}>CONNECTED</span>
-          </div>
-          <div className="terminal-body" style={{ minHeight: '150px', maxHeight: '300px', overflowY: 'auto' }}>
-            {incomingClues.filter(c => c.type === 'text').map((c, i) => (
-              <p key={i} style={{ marginTop: '0.5rem' }}>
-                <span style={{ color: '#ff00c1' }}>LEGACY_SIGNAL_{i}:</span> {c.value}
-              </p>
-            ))}
-          </div>
-          <div style={{ marginTop: '1rem', borderTop: '1px solid rgba(0,242,255,0.3)', paddingTop: '1rem' }}>
-            <input 
-              type="text" 
-              placeholder="Geçmişe komut gönder..." 
-              value={terminalInput}
-              onChange={(e) => setTerminalInput(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && (sendClue('future-clue', terminalInput), setTerminalInput(''))}
-              style={{ background: 'transparent', border: '1px solid var(--future-accent)', color: 'white', padding: '0.5rem', width: '70%' }}
-            />
-            <button onClick={() => {
-              sendClue('future-clue', terminalInput);
-              setTerminalInput('');
-            }}>GÖNDER</button>
-          </div>
+      {step === 2 && (
+        <div className="terminal-window mission-panel">
+          <p>SİSTEM KİLİTLİ: Mirasçının ismini girin.</p>
+          <input type="text" onChange={(e) => setInput(e.target.value)} />
+          <button onClick={() => input.toUpperCase() === 'AURELIUS' && onNext(3)}>DOĞRULA</button>
+          <p style={{ marginTop: '1rem' }}>Gelen Mesajlar:</p>
+          {incomingClues.filter(c => c.type === 'text').map((c, i) => <p key={i} color="#ff00c1">> {c.value}</p>)}
         </div>
-      </main>
+      )}
+
+      {step === 3 && (
+        <div className="terminal-window mission-panel">
+          <p>KASA KOORDİNATI: (X:8, Y:5, Z:2)</p>
+          <p>Bu numaraları geçmişe gönder!</p>
+          <button onClick={() => sendClue('future-clue', 'Şifre: 852')}>ŞİFREYİ GÖNDER</button>
+        </div>
+      )}
+
+      {step === 4 && <div className="success-overlay"><h1>BAŞARDINIZ!</h1><p>Tüm veriler kurtarıldı.</p></div>}
     </div>
   );
 };
